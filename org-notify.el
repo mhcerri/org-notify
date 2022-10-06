@@ -112,6 +112,12 @@
 (defvar org-notify-on-action-map nil
   "Mapping between on-action identifiers and parameter lists.")
 
+(defcustom org-notify-timestamp-type 'both
+  "Which types of timestamp to check."
+  :type '(choice (const :tag "Scheduled timestamps" scheduled)
+                 (const :tag "Deadline timestamps" deadline)
+                 (const :tag "Both scheduled and deadline timestamps" both)))
+
 (defun org-notify-string->seconds (str)
   "Convert time string STR to number of seconds."
   (when str
@@ -134,12 +140,24 @@ simple timestamp string."
 				(plist-get (plist-get orig 'timestamp)
 					   :raw-value))))
 
+(defun org-notify--get-deadline (list)
+  "Get the next deadline from the LIST."
+  (cl-macrolet ((get (k) `(plist-get list ,k)))
+    (let ((deadline (org-notify-convert-deadline (get :deadline)))
+          (scheduled (org-notify-convert-deadline (get :scheduled))))
+      (cond ((eq org-notify-timestamp-type 'scheduled) scheduled)
+            ((eq org-notify-timestamp-type 'deadline) deadline)
+            ((null deadline) scheduled)
+            ((null scheduled) deadline)
+            ((< deadline scheduled) deadline)
+            (t scheduled)))))
+
 (defun org-notify-make-todo (heading &rest _ignored)
   "Create one todo item."
   (cl-macrolet ((get (k) `(plist-get list ,k))
              (pr (k v) `(setq result (plist-put result ,k ,v))))
     (let* ((list (nth 1 heading))      (notify (or (get :NOTIFY) "default"))
-           (deadline (org-notify-convert-deadline (get :deadline)))
+           (deadline (org-notify--get-deadline list))
 	   (heading (get :raw-value))
            result)
       (when (and (eq (get :todo-type) 'todo) heading deadline)
