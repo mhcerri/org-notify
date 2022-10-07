@@ -112,9 +112,6 @@
 (defvar org-notify-timer nil
   "Timer of the notification daemon.")
 
-(defvar org-notify-parse-file nil
-  "Index of current file, that `org-element-parse-buffer' is parsing.")
-
 (defvar org-notify-on-action-map nil
   "Mapping between on-action identifiers and parameter lists.")
 
@@ -158,8 +155,8 @@ simple timestamp string."
             ((< deadline scheduled) deadline)
             (t scheduled)))))
 
-(defun org-notify-make-todo (heading &rest _ignored)
-  "Create one todo item."
+(defun org-notify-make-todo (file heading &rest _ignored)
+  "Create one todo item for the HEADING from FILE."
   (cl-macrolet ((get (k) `(plist-get list ,k))
              (pr (k v) `(setq result (plist-put result ,k ,v))))
     (let* ((list (nth 1 heading))      (notify (or (get :NOTIFY) "default"))
@@ -169,26 +166,18 @@ simple timestamp string."
       (when (and (eq (get :todo-type) 'todo) heading deadline)
         (pr :heading heading)     (pr :notify (intern notify))
         (pr :begin (get :begin))
-        (pr :file (nth org-notify-parse-file (org-agenda-files 'unrestricted)))
+        (pr :file file)
         (pr :timestamp deadline)  (pr :uid (md5 (concat heading deadline)))
         (pr :deadline (- (org-time-string-to-seconds deadline)
                          (float-time))))
       result)))
 
-(defun org-notify-todo-list ()
-  "Create the todo-list for one org-agenda file."
-  (let* ((files (org-agenda-files 'unrestricted))
-         (max (1- (length files))))
-    (when files
-      (setq org-notify-parse-file
-	    (if (or (not org-notify-parse-file) (>= org-notify-parse-file max))
-		0
-	      (1+ org-notify-parse-file)))
-      (save-excursion
-	(with-current-buffer (find-file-noselect
-			      (nth org-notify-parse-file files))
-	  (org-element-map (org-element-parse-buffer 'headline)
-	      'headline 'org-notify-make-todo))))))
+(defun org-notify-todo-list (file)
+  "Create the todo-list for one `org-agenda` FILE."
+  (save-excursion
+    (with-current-buffer (find-file-noselect file)
+      (org-element-map (org-element-parse-buffer 'headline)
+	  'headline (apply-partially 'org-notify-make-todo file)))))
 
 (defun org-notify-maybe-too-late (diff period heading)
   "Print warning message, when notified significantly later than defined by
@@ -198,38 +187,41 @@ PERIOD."
   t)
 
 (cl-defun org-notify-process ()
-  "Process the todo-list, and possibly notify user about upcoming or
-forgotten tasks."
+  "Process the todo-list.
+And possibly notify user about upcoming or forgotten tasks."
   (let ((notification-cnt 0))
-    (cl-macrolet ((prm (k) `(plist-get prms ,k))  (td (k) `(plist-get todo ,k)))
-      (dolist (todo (org-notify-todo-list))
-	(let* ((deadline (td :deadline))  (heading (td :heading))
-               (uid (td :uid))            (last-run-sym
-                                           (intern (concat ":last-run-" uid))))
-          (cl-dolist (prms (plist-get org-notify-map (td :notify)))
-            (when (< deadline (org-notify-string->seconds (prm :time)))
-              (let ((period (org-notify-string->seconds (prm :period)))
-                    (last-run (prm last-run-sym))  (now (float-time))
-                    (actions (prm :actions))       diff  plist)
-		(when (or (not last-run)
-                          (and period (< period (setq diff (- now last-run)))
-                               (org-notify-maybe-too-late diff period heading)))
-                  (setq prms (plist-put prms last-run-sym now)
-			plist (append todo prms))
-                  (if (if (plist-member prms :audible)
-                          (prm :audible)
-			org-notify-audible)
-                      (ding))
-                  (setq actions (ensure-list actions))
-		  (cl-incf notification-cnt)
-                  (dolist (action actions)
-                    (funcall (if (fboundp action) action
-                               (intern (concat "org-notify-action"
-                                               (symbol-name action))))
-			     plist))
-		  (when (>= notification-cnt org-notify-max-notifications-per-run)
-		    (cl-return-from org-notify-process))))
-	      (cl-return))))))))
+    (dolist (file (org-agenda-files 'unrestricted))
+      (cl-macrolet ((prm (k) `(plist-get prms ,k))  (td (k) `(plist-get todo ,k)))
+        (dolist (todo (org-notify-todo-list file))
+	  (let* ((deadline (td :deadline))  (heading (td :heading))
+                 (uid (td :uid))            (last-run-sym
+                                             (intern (concat ":last-run-" uid))))
+            (cl-dolist (prms (plist-get org-notify-map (td :notify)))
+              (when (< deadline (org-notify-string->seconds (prm :time)))
+                (let ((period (org-notify-string->seconds (prm :period)))
+                      (last-run (prm last-run-sym))  (now (float-time))
+                      (actions (prm :actions))       diff  plist)
+		  (when (or (not last-run)
+                            (and period (< period (setq diff (- now last-run)))
+                                 (org-notify-maybe-too-late diff period heading)))
+                    (setq prms (plist-put prms last-run-sym now)
+			  plist (append todo prms))
+                    (if (if (plist-member prms :audible)
+                            (prm :audible)
+			  org-notify-audible)
+                        (ding))
+                    (setq actions (ensure-list actions))
+		    (cl-incf notification-cnt)
+                    (dolist (action actions)
+                      (funcall (if (fboundp action) action
+                                 (intern (concat "org-notify-action"
+                                                 (symbol-name action))))
+			       plist))
+		    (when (and org-notify-max-notifications-per-run
+                               (>= notification-cnt org-notify-max-notifications-per-run))
+                      (message "org-notify: limit of notifications reached!")
+		      (cl-return-from org-notify-process))))
+	        (cl-return)))))))))
 
 (defun org-notify-add (name &rest params)
   "Add a new notification type.
