@@ -92,6 +92,12 @@
   "Maximum number of notifications per run of `org-notify-process'."
   :type 'integer)
 
+(defcustom org-notify-icon
+  (concat data-directory
+          "images/icons/hicolor/scalable/apps/emacs.svg")
+  "Filename of default icon to show for notifications."
+  :type 'string)
+
 (defconst org-notify-actions
   '("show" "show" "done" "done" "hour" "one hour later" "day" "one day later"
     "week" "one week later")
@@ -411,9 +417,13 @@ org-notify window.  Mostly copied from `appt-select-lowest-window'."
   "Pop up a notification window."
   (require 'notifications)
   (let* ((duration (plist-get plist :duration))
+         (icon (if (file-exists-p org-notify-icon)
+                   org-notify-icon
+                 nil))
          (id (notifications-notify
               :title     (plist-get plist :heading)
               :body      (org-notify-body-text plist)
+              :app-icon  icon
               :timeout   (if duration (* duration 1000))
               :urgency   (plist-get plist :urgency)
               :actions   org-notify-actions
