@@ -98,6 +98,10 @@
   "Filename of default icon to show for notifications."
   :type 'string)
 
+(defcustom org-notify-default-notify-urgency 'normal
+  "Default notification urgency for notifications-notify."
+  :type 'symbol)
+
 (defconst org-notify-actions
   '("show" "show" "done" "done" "hour" "one hour later" "day" "one day later"
     "week" "one week later")
@@ -417,7 +421,8 @@ org-notify window.  Mostly copied from `appt-select-lowest-window'."
               :body      (org-notify-body-text plist)
               :app-icon  icon
               :timeout   (if duration (* duration 1000))
-              :urgency   (plist-get plist :urgency)
+              :urgency   (or (plist-get plist :urgency)
+                             org-notify-default-notify-urgency)
               :actions   org-notify-actions
               :on-action 'org-notify-on-action-notify)))
     (setq org-notify-on-action-map
